@@ -28,8 +28,8 @@ void setup() {
 }
 
 void loop() {
-  if (!arduboy.nextFrame()) return;
-  arduboy.pollButtons();
+  // if (!arduboy.nextFrame()) return;
+  // arduboy.pollButtons();
 
   // Simple animated heartbeat so you KNOW it's running:
   uint32_t now = millis();
@@ -44,14 +44,14 @@ void loop() {
   int y = 0;
   x = (x + 2) % 128;
 
-  arduboy.clear();
-  arduboy.setCursor(0, y);
-  arduboy.print(F("Hello COSMAC VIP!"));
-  y += 20;
-  arduboy.drawFastHLine(0, y, 128);   // a line
-  y += 4;
-  arduboy.fillRect(x, y, 10, 10);     // moving block
-  y += 12;
+  // arduboy.clear();
+  // arduboy.setCursor(0, y);
+  // arduboy.print(F("Hello COSMAC VIP!"));
+  // y += 20;
+  // arduboy.drawFastHLine(0, y, 128);   // a line
+  // y += 4;
+  // arduboy.fillRect(x, y, 10, 10);     // moving block
+  // y += 12;
   arduboy.setCursor(0, y);
   arduboy.print("R0:");
   arduboy.print(cdp->R[0], HEX);
@@ -59,6 +59,6 @@ void loop() {
   arduboy.print(cdp->D, HEX);
   arduboy.print(" M:");
   arduboy.print(cdp->mget(0), HEX);
-  arduboy.display();
+  // arduboy.display();
   cdp1802_dispatch();
 }

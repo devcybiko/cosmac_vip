@@ -15,9 +15,11 @@ void setup() {
   arduboy.setCursor(0, 0);
   arduboy.print(F("Hello COSMAC VIP!"));
   arduboy.display();            // push first frame immediately
-  cdp1802_init();
-  cdp1802 *info = cdp1802_info();
-  memcpy(info->M, rom, sizeof(rom));
+  static unsigned char memory[256];
+  static unsigned char *pages[1];
+  pages[0] = memory;
+  memcpy(memory, rom, sizeof(rom));
+  cdp1802_init(pages, 1);
 }
 
 void loop() {
@@ -34,20 +36,25 @@ void loop() {
 
   // Draw something every frame
   static int x = 0;
+  int y = 0;
   x = (x + 2) % 128;
 
   arduboy.clear();
-  arduboy.setCursor(0, 0);
+  arduboy.setCursor(0, y);
   arduboy.print(F("Hello COSMAC VIP!"));
-  arduboy.drawFastHLine(0, 20, 128);   // a line
-  arduboy.fillRect(x, 32, 10, 10);     // moving block
+  y += 20;
+  arduboy.drawFastHLine(0, y, 128);   // a line
+  y += 4;
+  arduboy.fillRect(x, y, 10, 10);     // moving block
   cdp1802 *info = cdp1802_info();
-  arduboy.setCursor(0, 50);
-  arduboy.print("R0: 0x");
-  arduboy.println(info->R[0], HEX);
-  arduboy.setCursor(64, 50);
-  arduboy.print("D: 0x");
-  arduboy.println(info->D, HEX);
+  y += 12;
+  arduboy.setCursor(0, y);
+  arduboy.print("R0:");
+  arduboy.print(info->R[0], HEX);
+  arduboy.print(" D:");
+  arduboy.print(info->D, HEX);
+  arduboy.print(" M:");
+  arduboy.print(info->PAGES[0][0], HEX);
   arduboy.display();
   cdp1802_dispatch();
 }

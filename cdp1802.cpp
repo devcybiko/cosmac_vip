@@ -3,7 +3,8 @@
 
 // #include <avr/pgmspace.h>
 
-static unsigned char M[512];
+static unsigned char **PAGES;
+static unsigned short N_PAGES;
 static unsigned short R[16];
 static unsigned char *rp = (unsigned char *)R;
 static unsigned short P;
@@ -17,6 +18,8 @@ static unsigned char flags[16]; // 0, q, z, df, ef0-3, and inverses
 
 #define LO 0
 #define HI 1
+
+#define M(x) (PAGES[rp[x*2+HI]][R[x*2+LO]])
 
 // flags
 #define UF 0 // unconditional branch
@@ -47,13 +50,13 @@ void cdp1802_logic7(unsigned char N) {
 
     switch (N) {
     case 0x00: // return - M(R(X)) -> (X,P); R(X)+1; 1 -> IE 
-        m = M[R[X]++];
+        m = M(X); R[X]++;
         X = m >> 4;
         P = m & 0x0f;
         IE = 1;
         break;
     case 0x01: // disable - M(R(X)) -> (X,P), R(X)+1; 0 -> IE 
-        m = M[R[X]++];
+        m = M(X); R[X]++;
         X = m >> 4;
         P = m & 0x0f;
         IE = 0;
@@ -62,15 +65,15 @@ void cdp1802_logic7(unsigned char N) {
         D = R[X]++;
         break;
     case 0x03: // stxd
-        M[R[X]--] = D;
+        M(X) = D; R[X]--;
         break;
-    case 0x04: // adc: M(R(X))+D+DF -? DF, D
-        x = (unsigned short)M[R[X]] + D + flags[DF];
+    case 0x04: // adc: M(R(X))+D+DF -> DF, D
+        x = (unsigned short)M(X) + D + flags[DF];
         D = x & 0xff;
         UPDATE_CARRY(x);
         break;
     case 0x05: // sdb: M(R(X))-D-(NOT DF) -> DF, D 
-        x = (unsigned short)M[R[X]] - D - flags[NDF];
+        x = (unsigned short)M(X) - D - flags[NDF];
         D = x & 0xff;
         UPDATE_BORROW(x);
         break;
@@ -82,17 +85,17 @@ void cdp1802_logic7(unsigned char N) {
         if (flags[DF]) D = D | carry;
         break;
     case 0x07: // smb: D-M(R(X))-(NOT DF) -> DF, D   
-        x = (unsigned short)D - M[R[X]] - flags[NDF];
+        x = (unsigned short)D - M(X) - flags[NDF];
         D = x & 0xff;
         UPDATE_BORROW(x);
         break;
     case 0x0c: // adci: M(R(P))+D+DF -> DF, D;R(P)+1 
-        x = (unsigned short)M[R[P]++] + D + flags[DF];
+        x = (unsigned short)M(P) + D + flags[DF]; R[P]++;
         D = x & 0xff;
         UPDATE_CARRY(x);
         break;
     case 0x0d: // sdbi: M(R(P))-D-(NOT DF) -> DF, D; R(P)+1
-        x = (unsigned short)M[R[P]++] - D - flags[NDF];
+        x = (unsigned short)M(P) - D - flags[NDF]; R[P]++;
         D = x & 0xff;
         UPDATE_BORROW(x);
         break;
@@ -104,7 +107,7 @@ void cdp1802_logic7(unsigned char N) {
         if (flags[DF]) D = D | carry;
         break;
     case 0x0f: // smbi: D-M(R(P))-(NOT DF) -> DF, D; R(P)+1  
-        x = (unsigned short)D - M[R[P]++];
+        x = (unsigned short)D - M(P); R[P]++;
         if (flags[NDF]) x--;
         D = x & 0xff;
         UPDATE_BORROW(x);
@@ -120,23 +123,23 @@ void cdp1802_logicf(unsigned char N) {
         D = R[X];
         break;
     case 0x01: // or: M(R(X)) OR D -> D 
-        D = M[R[X]] | D;
+        D = M(X) | D;
         break;
     case 0x02: // and: M(R(X)) AND D -> D 
-        D = M[R[X]] & D;
+        D = M(X) & D;
         break;
     case 0x03: // xor: M(R(X)) XOR D -> D
-        D = M[R[X]] ^ D;
+        D = M(X) ^ D;
         break;
     case 0x04: // add: M(R(X))+D -> DF, D 
-        x = (unsigned short)M[R[X]] + D;
+        x = (unsigned short)M(X) + D;
         D = x & 0xff;
         flags[DF] = x >> 8;
         flags[NDF] = !flags[DF];
         UPDATE_CARRY(x);
         break;
     case 0x05: // sd: M(R(X))-D -> DF,D
-        x = (unsigned short)M[R[X]] - D;
+        x = (unsigned short)M(X) - D;
         D = x & 0xff;
         flags[NDF] = x >> 8; // no borrow == 1
         flags[DF] = !flags[NDF];
@@ -148,31 +151,31 @@ void cdp1802_logicf(unsigned char N) {
         D = D >> 1;
         break;
     case 0x07: // sm: D-M(R(X)) -> DF, D 
-        x = (unsigned short)D - M[R[X]];
+        x = (unsigned short)D - M(X);
         D = x & 0xff;
         flags[NDF] = x >> 8; // no borrow == 1
         flags[DF] = !flags[NDF];
         UPDATE_BORROW(x);
         break;
     case 0x08: // ldi
-        D = M[R[P]++];
+        D = M(P); R[P]++;
         break;
     case 0x09: // ori: M(R(P)) OR D -> D; R(P)+l
-        D = M[R[P]++] | D;
+        D = M(P) | D; R[P]++;
         break;
     case 0x0a: // andi: M(R(P)) AND D -> D; R(P)+1 
-        D = M[R[P]++] & D;
+        D = M(P) & D; R[P]++;
         break;
     case 0x0b: // xori: M(R(P)) XOR D -> D; R(P)+1 
-        D = M[R[P]++] ^ D;
+        D = M(P) ^ D; R[P]++;
         break;
     case 0x0c: // adi: M(R(P))+D -> DF, D; R(P)+1
-        x = (unsigned short)M[R[P]++] + D;
+        x = (unsigned short)M(P) + D; R[P]++;
         D = x &0xff;
         UPDATE_CARRY(x);
         break;
     case 0x0d: // sdi: M(R(P))-D -> DF,D; R(P)+1
-        x = (unsigned short)M[R[P]++] - D;
+        x = (unsigned short)M(P) - D; R[P]++;
         D = x & 0xff;
         UPDATE_BORROW(x);
         break;
@@ -182,7 +185,7 @@ void cdp1802_logicf(unsigned char N) {
         D = D << 1;
         break;
     case 0x0f: // smi: D-M(R(P)) -> DF, D; R(P)+1  
-        x = (unsigned short)D - M[R[P]++];
+        x = (unsigned short)D - M(P); R[P]++;
         D = x & 0xff;
         flags[NDF] = x >> 8; // no borrow == 1
         flags[DF] = !flags[NDF];
@@ -192,13 +195,12 @@ void cdp1802_logicf(unsigned char N) {
 }
 
 void cdp1802_dispatch() {
-    unsigned short pc = R[P]++;
-    unsigned char m = M[pc];
+    unsigned char m = M(P); R[P]++;
     unsigned char I = m >> 4;
     unsigned char N = m &0x0f;
     switch(I) {
     case 0x00: // ld(N)
-        D = M[R[N]];
+        D = M(N);
         break;
     case 0x01: // inc(N)
         R[N]++;
@@ -208,16 +210,16 @@ void cdp1802_dispatch() {
         break;
     case 0x03: // short branch
         UPDATE_ZF(D);
-        m = M[R[P]++];
+        m = M(P); R[P]++;
         if (flags[N]) {
             rp[P+LO] = m;
         }
         break;
     case 0x04: // lda(N)
-        D = M[R[N]++];
+        D = M(N); R[N]++;
         break;
     case 0x05: // str(n)
-        M[R[N]] = D;
+        M(N) = D;
         break;
     case 0x06: // i/o
         if (N==0) {
@@ -243,8 +245,8 @@ void cdp1802_dispatch() {
         break;
     case 0x0c: // long branch
         UPDATE_ZF(D);
-        unsigned char hi = M[R[P]++];
-        unsigned char lo = M[R[P]++];
+        unsigned char hi = M(P); R[P]++;
+        unsigned char lo = M(P); R[P]++;
         if (flags[N]) {
             rp[P+HI] = hi;
             rp[P+LO] = lo;
@@ -262,8 +264,9 @@ void cdp1802_dispatch() {
     }
 }
 
-void cdp1802_init() {
-    memset(M, 0, sizeof(M)); // zero memory
+void cdp1802_init(unsigned char **pages, unsigned int n_pages) {
+    PAGES=pages;
+    N_PAGES = n_pages;
     memset(flags, 0, 8); // set flags to false
     memset(&flags[8], 0x01, 8); // set negative flags to true
     flags[UF] = 0x01; // unconditional branch
@@ -274,7 +277,6 @@ void cdp1802_init() {
 }
 
 void cdp1802_main() {
-    cdp1802_init();
     while(true) {
         cdp1802_dispatch();
     }
@@ -283,7 +285,8 @@ void cdp1802_main() {
 static cdp1802 cdp;
 
 cdp1802 *cdp1802_info() {
-    cdp.M = M;
+    cdp.PAGES = PAGES;
+    cdp.N_PAGES = N_PAGES;
     cdp.R = R;
     cdp.rp = rp;
     cdp.P = P;

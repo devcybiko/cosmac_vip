@@ -8,7 +8,7 @@ unsigned char rom[] = {
     0x11, // incr(1)
     0x81, // glo(1)
     0x51, // str(1)
-    0x30,  // br 06
+    0x3a,  // bnz 06
     0x06,
     0x30, // br here
     0x0b // 

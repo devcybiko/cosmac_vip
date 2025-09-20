@@ -8,6 +8,7 @@ uint32_t lastBlink = 0;
 bool ledOn = false;
 static cdp1802 *cdp;
 static uint8_t* fb;
+static uint8_t fb2[256];
 
 unsigned char mget(unsigned short addr) {
   return rom[addr & 0xff];
@@ -15,7 +16,14 @@ unsigned char mget(unsigned short addr) {
 
 void mset(unsigned short addr, unsigned char byte) {
   if (addr > 256) {
-    fb[addr % 256] = byte;
+    addr = addr % 256;
+    addr = addr * 8;
+    uint16_t y = addr / 32;
+    uint16_t x = addr % 64;
+    for (uint16_t i = 0; i<256; i*=2) {
+      arduboy.drawPixel(x, y, byte & i);
+      x += 1;
+    }
   } else {
     rom[addr] = byte;
   }
@@ -27,7 +35,7 @@ void setup() {
   arduboy.setFrameRate(30);     // keep it simple
   arduboy.clear();
   arduboy.setCursor(0, 0);
-  arduboy.print(F("Hello COSMAC VIP!"));
+  arduboy.print(F("Hello COSMAC VIP EMU!"));
   arduboy.display();            // push first frame immediately
   fb = arduboy.getBuffer();
   cdp = cdp1802_init(mget, mset);
@@ -36,8 +44,13 @@ void setup() {
 
 
 void loop() {
-  if (arduboy.nextFrame()) 
-    arduboy.display();
+  if (arduboy.nextFrame())  {
+      arduboy.setCursor(0, 34);
+      arduboy.println(cdp->R[0], HEX);
+      arduboy.println(cdp->R[1], HEX);
+      arduboy.display();
+
+  }
   // Simple animated heartbeat so you KNOW it's running:
   uint32_t now = millis();
   if (now - lastBlink > 500) {

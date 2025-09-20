@@ -15,7 +15,7 @@ unsigned char mget(unsigned short addr) {
 
 void mset(unsigned short addr, unsigned char byte) {
   if (addr > 256) {
-    fb[addr % 256] = byte
+    fb[addr % 256] = byte;
   } else {
     rom[addr] = byte;
   }

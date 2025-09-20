@@ -13,13 +13,15 @@ static uint8_t fb2[256];
 unsigned char mget(unsigned short addr) {
   return rom[addr & 0xff];
 }
+static    uint16_t y;
+static    uint16_t x;
 
 void mset(unsigned short addr, unsigned char byte) {
   if (addr > 256) {
     addr = addr % 256;
-    addr = addr * 8;
-    uint16_t y = addr / 32;
-    uint16_t x = addr % 64;
+    y = addr / 8;
+    x = addr % 8;
+    x = addr * 8;
     for (uint16_t i = 0; i<256; i*=2) {
       arduboy.drawPixel(x, y, byte & i);
       x += 1;
@@ -34,8 +36,8 @@ void setup() {
   arduboy.begin();              // shows boot logo for ~2s if not disabled in system settings
   arduboy.setFrameRate(30);     // keep it simple
   arduboy.clear();
-  arduboy.setCursor(0, 0);
-  arduboy.print(F("Hello COSMAC VIP EMU!"));
+  arduboy.setCursor(0, 50);
+  arduboy.print(F("COSMAC VIP EMU 3!"));
   arduboy.display();            // push first frame immediately
   fb = arduboy.getBuffer();
   cdp = cdp1802_init(mget, mset);
@@ -48,6 +50,10 @@ void loop() {
       arduboy.setCursor(0, 34);
       arduboy.println(cdp->R[0], HEX);
       arduboy.println(cdp->R[1], HEX);
+      arduboy.setCursor(64, 34);
+      arduboy.println(x);
+      arduboy.setCursor(64, 44);
+      arduboy.println(y);
       arduboy.display();
 
   }

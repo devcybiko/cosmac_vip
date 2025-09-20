@@ -5,9 +5,6 @@
 
 static cdp1802 cdp;
 
-#define LO 0
-#define HI 1
-
 // flags
 #define UF 0 // unconditional branch
 #define NUF 8 // nop
@@ -202,7 +199,8 @@ void cdp1802_dispatch() {
         UPDATE_ZF(cdp.D);
         m = MGET(cdp.P); cdp.R[cdp.P]++;
         if (cdp.flags[N]) {
-            cdp.rp[cdp.P+LO] = m;
+            cdp.R[N] &= 0xff00;
+            cdp.R[N] |= m;
         }
         break;
     case 0x04: // lda(N)
@@ -222,24 +220,26 @@ void cdp1802_dispatch() {
         cdp1802_logic7(N);
         break;
     case 0x08: // glo(N)
-        cdp.D = cdp.rp[(N<<1)+LO]; // get the low byte of the register
+        cdp.D = cdp.R[N] & 0xff; // get the low byte of the register
         break;
     case 0x09: // ghi(N)
-        cdp.D = cdp.rp[(N<<1)+HI]; // get the high byte of the register
+        cdp.D = cdp.R[N] >> 8; // get the high byte of the register
         break;
     case 0x0a: // setlo(N)
-        cdp.rp[(N<<1)+LO] = cdp.D; // set the low byte of the register
+        cdp.R[N] &= 0xff00;
+        cdp.R[N] |= cdp.D; // set the low byte of the register
         break;
     case 0x0b: //sethi(N)
-        cdp.rp[(N<<1)+HI] = cdp.D; // set the high byte of the register
+        cdp.R[N] &= 0x00ff;
+        cdp.R[N] |= ((unsigned short)cdp.D) << 8; // set the low byte of the register
         break;
     case 0x0c: // long branch
         UPDATE_ZF(cdp.D);
-        unsigned char hi = MGET(cdp.P); cdp.R[cdp.P]++;
-        unsigned char lo = MGET(cdp.P); cdp.R[cdp.P]++;
+        unsigned short hi = MGET(cdp.P); cdp.R[cdp.P]++;
+        unsigned short lo = MGET(cdp.P); cdp.R[cdp.P]++;
         if (cdp.flags[N]) {
-            cdp.rp[cdp.P+HI] = hi;
-            cdp.rp[cdp.P+LO] = lo;
+            cdp.R[N] = hi << 8;
+            cdp.R[N] |= lo;
         }
         break;
     case 0x0d: // sep(N)

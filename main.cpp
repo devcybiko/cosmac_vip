@@ -7,13 +7,18 @@ Arduboy2 arduboy;
 uint32_t lastBlink = 0;
 bool ledOn = false;
 static cdp1802 *cdp;
+static uint8_t* fb;
 
 unsigned char mget(unsigned short addr) {
-  return rom[addr];
+  return rom[addr & 0xff];
 }
 
 void mset(unsigned short addr, unsigned char byte) {
-  rom[addr] = byte;
+  if (addr > 256) {
+    fb[addr % 256] = byte
+  } else {
+    rom[addr] = byte;
+  }
 }
 
 void setup() {
@@ -24,13 +29,15 @@ void setup() {
   arduboy.setCursor(0, 0);
   arduboy.print(F("Hello COSMAC VIP!"));
   arduboy.display();            // push first frame immediately
+  fb = arduboy.getBuffer();
   cdp = cdp1802_init(mget, mset);
 }
 
-void loop() {
-  // if (!arduboy.nextFrame()) return;
-  // arduboy.pollButtons();
 
+
+void loop() {
+  if (arduboy.nextFrame()) 
+    arduboy.display();
   // Simple animated heartbeat so you KNOW it's running:
   uint32_t now = millis();
   if (now - lastBlink > 500) {
@@ -38,27 +45,5 @@ void loop() {
     ledOn = !ledOn;
     arduboy.setRGBled(ledOn ? 32 : 0, 0, 0);  // faint red blink every 0.5s
   }
-
-  // Draw something every frame
-  static int x = 0;
-  int y = 0;
-  x = (x + 2) % 128;
-
-  // arduboy.clear();
-  // arduboy.setCursor(0, y);
-  // arduboy.print(F("Hello COSMAC VIP!"));
-  // y += 20;
-  // arduboy.drawFastHLine(0, y, 128);   // a line
-  // y += 4;
-  // arduboy.fillRect(x, y, 10, 10);     // moving block
-  // y += 12;
-  arduboy.setCursor(0, y);
-  arduboy.print("R0:");
-  arduboy.print(cdp->R[0], HEX);
-  arduboy.print(" D:");
-  arduboy.print(cdp->D, HEX);
-  arduboy.print(" M:");
-  arduboy.print(cdp->mget(0), HEX);
-  // arduboy.display();
   cdp1802_dispatch();
 }

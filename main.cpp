@@ -6,6 +6,15 @@ Arduboy2 arduboy;
 
 uint32_t lastBlink = 0;
 bool ledOn = false;
+static cdp1802 *cdp;
+
+unsigned char mget(unsigned short addr) {
+  return rom[addr];
+}
+
+void mset(unsigned short addr, unsigned char byte) {
+  rom[addr] = byte;
+}
 
 void setup() {
   // Must initialize the hardware & display
@@ -15,11 +24,7 @@ void setup() {
   arduboy.setCursor(0, 0);
   arduboy.print(F("Hello COSMAC VIP!"));
   arduboy.display();            // push first frame immediately
-  static unsigned char memory[256];
-  static unsigned char *pages[1];
-  pages[0] = memory;
-  memcpy(memory, rom, sizeof(rom));
-  cdp1802_init(pages, 1);
+  cdp = cdp1802_init(mget, mset);
 }
 
 void loop() {
@@ -46,15 +51,14 @@ void loop() {
   arduboy.drawFastHLine(0, y, 128);   // a line
   y += 4;
   arduboy.fillRect(x, y, 10, 10);     // moving block
-  cdp1802 *info = cdp1802_info();
   y += 12;
   arduboy.setCursor(0, y);
   arduboy.print("R0:");
-  arduboy.print(info->R[0], HEX);
+  arduboy.print(cdp->R[0], HEX);
   arduboy.print(" D:");
-  arduboy.print(info->D, HEX);
+  arduboy.print(cdp->D, HEX);
   arduboy.print(" M:");
-  arduboy.print(info->PAGES[0][0], HEX);
+  arduboy.print(cdp->mget(0), HEX);
   arduboy.display();
   cdp1802_dispatch();
 }

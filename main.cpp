@@ -37,7 +37,7 @@ void mset(unsigned short addr, unsigned char byte) {
 void setup() {
   // Must initialize the hardware & display
   arduboy.begin();              // shows boot logo for ~2s if not disabled in system settings
-  arduboy.setFrameRate(1);     // keep it simple
+  arduboy.setFrameRate(30);     // keep it simple
   arduboy.clear();
   arduboy.setCursor(0, 54);
   // arduboy.print(F("COSMAC VIP EMU!"));

@@ -28,8 +28,36 @@ In fact, if you look at mset() in its current implementation, it actually detect
 
 I had hoped to write directly to the OLED (see oled.cpp), but you cannot read the OLED display and so you must have a backing frame buffer anyway. I might be able to write my own frame buffer handler (using just 64x32 pixels) and thus returning 768 bytes of RAM to the emulator. And since we're only transferring 256 bytes (instead of 1K) to the OLED then we also get a speed bump.
 
+The current version of the display `mset()` function doubles the vertical pixels of the screen for readability.
+
+I have written a bit of code that writes only half the frame buffer to the OLED. I was hoping for a performance boost, but it's clear that the CDP1802 emulator is the big performance hog, not the OLED transfer.
+
+However, as mentioned earlier, we can scarf up some of the unused video memory for emulated memory. That will come later.
+
 ## Keyboard Emulation
 
-I haven't looked at the Arduboy I/O library yet to emulate a keyboard. I know that 1802 projects cover a wide range of hardware configurations, so emulating every possibility at that level is likely out of scope. 
+Because the graphics are rotated 90 degrees to accommodate the OLED's memory configuration, I've mapped the D-Pad as follows:
 
+| Rotated | EFlag | d-pad |
+|-------|-------|--------|
+| UP |  EF1 | left |
+| DOWN | EF2 | right |
+| LEFT | EF3 | down |
+| RIGHT | EF4 | up |
 
+I have plans to map the entire button bitmap (including A_BUTTON and B_BUTTON from arduboy.buttonsState()) to one of the INPUT opcodes.
+
+For the demo (spaceship.h) I have hardwired the UP_BUTTON and DOWN_BUTTON to a `y_offset` variable to experiment with offset for the display.
+
+## Q-Flag and Hardware Emulation
+
+The majority of hardware emulation deals with the keyboard buttons and the display. I mapped the `Q` flag to the speaker and LED. So you get a "realistic" squeal from the EMU when `Q` is set.
+    
+## TODO and Future Plans
+
+1. Virtual Memory
+2. FLASH Memory reading (ROM)
+3. CHIP-8 
+4. Multiple programs stored in FLASH
+5. User uploads of programs (.hex files?)
+6. Performance

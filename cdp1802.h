@@ -31,12 +31,3 @@ extern cdp1802* cdp1802_info();
 #define _EF2 5
 #define _EF3 6
 #define _EF4 7
-
-#define _NUF 8 // nop
-#define _NQF 9
-#define _NZF 10
-#define _NDF 11
-#define _NEF1 12
-#define _NEF2 13
-#define _NEF3 14
-#define _NEF4 15

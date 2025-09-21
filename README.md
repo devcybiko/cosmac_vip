@@ -26,11 +26,17 @@ In fact, if you look at mset() in its current implementation, it actually detect
 
 ## Display Emulation
 
-I had hoped to write directly to the OLED (see oled.cpp), but you cannot read the OLED display and so you must have a backing frame buffer anyway. I might be able to write my own frame buffer handler (using just 64x32 pixels) and thus returning 768 bytes of RAM to the emulator. And since we're only transferring 256 bytes (instead of 1K) to the OLED then we also get a speed bump.
+Probably the biggest concession I made in the emulation was turining the Arduboy sideways. The OLED memory is orgainized in columns of bytes rather than rows (like most displays, including the COSMAC VIPs Pixie display).
+
+So I end up playing the EMU in landscape mode with the D-PAD on the left. This works for me since I'm left handed. There are `flipVertical` and `flipHorizontal` commands in the Arduboy2 library that can be called to accommodate those few who play their games with their right hand.
+
+I had hoped to write directly to the OLED (see oled.cpp), but you cannot read the OLED display memory and so you must have a backing frame buffer anyway - so I am stuck using the Arduboy's 1024-byte frame buffer (hogging nearly half the RAM). 
+
+I might be able to write my own frame buffer handler (using just 64x32 pixels) and thus returning 768 bytes of RAM to the emulator. And since we're only transferring 256 bytes (instead of 1K) to the OLED then we also get a speed bump.
 
 The current version of the display `mset()` function doubles the vertical pixels of the screen for readability.
 
-I have written a bit of code that writes only half the frame buffer to the OLED. I was hoping for a performance boost, but it's clear that the CDP1802 emulator is the big performance hog, not the OLED transfer.
+UPDATE: I have written a bit of code that writes only half the frame buffer to the OLED. I was hoping for a performance boost, but it's clear that the CDP1802 emulator is the big performance hog, not the OLED transfer.
 
 However, as mentioned earlier, we can scarf up some of the unused video memory for emulated memory. That will come later.
 

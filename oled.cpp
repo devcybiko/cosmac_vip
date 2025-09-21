@@ -7,7 +7,7 @@
 #define PIN_CS   12  // Chip Select
 
 // 128x64 mono framebuffer: 1 bit per pixel, arranged in pages (8 rows per byte).
-static uint8_t FB[128 * 64 / 8];
+static uint8_t FB[32 * 64 / 8];
 
 // ---- Low-level SPI (uses hardware SPI on ATmega32u4) ----
 static inline void spiBegin() {
@@ -94,7 +94,9 @@ static void flush() {
 static inline void fbClear() {
   memset(FB, 0x00, sizeof(FB));
 }
-
+static inline uint8_t *fbRAM() {
+  return FB;
+}
 // Set/clear a pixel in the framebuffer
 static inline void setPixel(uint8_t x, uint8_t y, bool on) {
   if (x >= 128 || y >= 64) return;

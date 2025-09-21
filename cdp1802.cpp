@@ -1,249 +1,279 @@
 #include <string.h>
+#include <stdint.h>
 #include "cdp1802.h"
 
 // #include <avr/pgmspace.h>
 
+// Compiler optimization hints
+#pragma GCC optimize("O3")
+#pragma GCC optimize("unroll-loops")
+
 static cdp1802 cdp;
+static unsigned char (*mget)(unsigned short addr);
+static void (*mset)(unsigned short addr, unsigned char byte);
+static unsigned short R[16];
+static unsigned short P;
+static unsigned short X;
+static unsigned char D;
+static unsigned char IE;
+static unsigned char flags[16]; // 1, z, q, df, ef1-4, 0, ~z, ~q, ~df, ~ef1-~ef4
+static unsigned short debug[16];
 
 // flags
-#define UF 0 // unconditional branch
-#define NUF 8 // nop
-#define QF 1
-#define NQF 9
-#define ZF 2
-#define NZF 10
 #define DF 3
 #define NDF 11
 
-#define MGET(reg) (cdp.mget(cdp.R[(reg)]))
-#define MSET(reg,value) (cdp.mset(cdp.R[(reg)], (value)))
+#define MGET0(reg) (mget(R[(reg)]))
+#define MGET(reg) (mget(R[(reg)]++))
+#define MSET(reg,value) (mset(R[(reg)], (value)))
 
 #define UPDATE_ZF(n) \
-    cdp.flags[ZF] = (n==0);\
-    cdp.flags[NZF] = !cdp.flags[ZF];
+    flags[_ZF] = (n==0);
 
 #define UPDATE_CARRY(n) \
-    cdp.flags[DF] = !!((n) & 0x0800);\
-    cdp.flags[NDF] = !cdp.flags[DF];
+    flags[_DF] = !!((n) & 0x0100);  // Bit 8 for 8-bit carry
 
 #define UPDATE_BORROW(n) \
-    cdp.flags[NDF] = !!(n & 0x0800);\
-    cdp.flags[DF] = !cdp.flags[NDF];
+    flags[_DF] = !((n) & 0x0100); \
 
-void cdp1802_logic7(unsigned char N) {
+static inline void cdp1802_logic7(unsigned char N) {
     unsigned char m;
     unsigned short x;
     unsigned char carry;
 
-    if (N == 0x00) { // return - M(cdp.R(cdp.X)) -> (cdp.X,cdp.P); cdp.R(cdp.X)+1; 1 -> cdp.IE 
-        m = cdp.mget(cdp.X); cdp.R[cdp.X]++;
-        cdp.X = m >> 4;
-        cdp.P = m & 0x0f;
-        cdp.IE = 1;
-    } else if (N == 0x01) { // disable - M(cdp.R(cdp.X)) -> (cdp.X,cdp.P), cdp.R(cdp.X)+1; 0 -> cdp.IE 
-        m = MGET(cdp.X); cdp.R[cdp.X]++;
-        cdp.X = m >> 4;
-        cdp.P = m & 0x0f;
-        cdp.IE = 0;
+    if (N == 0x00) { // return - M(R(X)) -> (X,P); R(X)+1; 1 -> IE 
+        m = MGET(X);
+        X = m >> 4;
+        P = m & 0x0f;
+        IE = 1;
+    } else if (N == 0x01) { // disable - M(R(X)) -> (X,P), R(X)+1; 0 -> IE 
+        m = MGET(X);
+        X = m >> 4;
+        P = m & 0x0f;
+        IE = 0;
     } else if (N == 0x02) { // ldxa
-        cdp.D = cdp.R[cdp.X]++;
+        D = R[X]++;
     } else if (N == 0x03) { // stxd
-        MSET(cdp.X, cdp.D); cdp.R[cdp.X]--;
-    } else if (N == 0x04) { // adc: M(cdp.R(cdp.X))+D+DF -> DF, D
-        x = (unsigned short)MGET(cdp.X) + cdp.D + cdp.flags[DF];
-        cdp.D = x & 0xff;
+        MSET(X, D); R[X]--;
+    } else if (N == 0x04) { // adc: M(R(X))+D+DF -> DF, D
+        x = (unsigned short)MGET0(X) + D + flags[_DF];
+        D = x & 0xff;
         UPDATE_CARRY(x);
-    } else if (N == 0x05) { // sdb: M(cdp.R(cdp.X))-D-(NOT DF) -> DF, cdp.D 
-        x = (unsigned short)MGET(cdp.X) - cdp.D - cdp.flags[NDF];
-        cdp.D = x & 0xff;
+    } else if (N == 0x05) { // sdb: M(R(X))-D-(NOT DF) -> DF, D 
+        x = (unsigned short)MGET0(X) - D - (!flags[_DF]);
+        D = x & 0xff;
         UPDATE_BORROW(x);
-    } else if (N == 0x06) { // shrc: SHIFT cdp.D cdp.RIGHT; LSB(D) -> DF, DF -> MSB(O)
-        carry = cdp.flags[DF];
-        cdp.flags[DF] = cdp.D & 0x01;
-        cdp.flags[NDF] = !cdp.flags[DF];
-        cdp.D = cdp.D >> 1;
-        if (cdp.flags[DF]) cdp.D = cdp.D | carry;
-    } else if (N == 0x07) { // smb: D-M(cdp.R(cdp.X))-(NOT DF) -> DF, cdp.D   
-        x = (unsigned short)cdp.D - MGET(cdp.X) - cdp.flags[NDF];
-        cdp.D = x & 0xff;
+    } else if (N == 0x06) { // shrc: SHIFT D RIGHT; LSB(D) -> DF, DF -> MSB(O)
+        carry = flags[_DF];
+        flags[_DF] = D & 0x01;
+        D = D >> 1;
+        if (flags[_DF]) D = D | carry;
+    } else if (N == 0x07) { // smb: D-M(R(X))-(NOT DF) -> DF, D   
+        x = (unsigned short)D - MGET0(X) - (!flags[_DF]);
+        D = x & 0xff;
         UPDATE_BORROW(x);
-    } else if (N == 0x0c) { // adci: M(cdp.R(cdp.P))+D+DF -> DF, cdp.D;cdp.R(cdp.P)+1 
-        x = (unsigned short)MGET(cdp.P) + cdp.D + cdp.flags[DF]; cdp.R[cdp.P]++;
-        cdp.D = x & 0xff;
+    } else if (N == 0x0a) { // smb: D-M(R(X))-(NOT DF) -> DF, D   
+        flags[_QF] = 0;
+    } else if (N == 0x0b) { // smb: D-M(R(X))-(NOT DF) -> DF, D   
+        flags[_QF] = 1;
+    } else if (N == 0x0c) { // adci: M(R(P))+D+DF -> DF, D;R(P)+1 
+        x = (unsigned short)MGET(P) + D + flags[_DF]; 
+        D = x & 0xff;
         UPDATE_CARRY(x);
-    } else if (N == 0x0d) { // sdbi: M(cdp.R(cdp.P))-D-(NOT DF) -> DF, cdp.D; cdp.R(cdp.P)+1
-        x = (unsigned short)MGET(cdp.P) - cdp.D - cdp.flags[NDF]; cdp.R[cdp.P]++;
-        cdp.D = x & 0xff;
+    } else if (N == 0x0d) { // sdbi: M(R(P))-D-(NOT DF) -> DF, D; R(P)+1
+        x = (unsigned short)MGET(P) - D - (!flags[_DF]); 
+        D = x & 0xff;
         UPDATE_BORROW(x);
-    } else if (N == 0x0e) { // shlc: SHIFT cdp.D LEFT; MSB(D) -> DF, 0-> LSB(D)
-        carry = cdp.flags[DF];
-        cdp.flags[DF] = cdp.D & 0x80;
-        cdp.flags[NDF] = !cdp.flags[DF];
-        cdp.D = cdp.D << 1;
-        if (cdp.flags[DF]) cdp.D = cdp.D | carry;
-    } else if (N == 0x0f) { // smbi: D-M(cdp.R(cdp.P))-(NOT DF) -> DF, cdp.D; cdp.R(cdp.P)+1  
-        x = (unsigned short)cdp.D - MGET(cdp.P); cdp.R[cdp.P]++;
-        if (cdp.flags[NDF]) x--;
-        cdp.D = x & 0xff;
+    } else if (N == 0x0e) { // shlc: SHIFT D LEFT; MSB(D) -> DF, 0-> LSB(D)
+        carry = flags[_DF];
+        flags[_DF] = D & 0x80;
+        D = D << 1;
+        if (flags[_DF]) D = D | carry;
+    } else if (N == 0x0f) { // smbi: D-M(R(P))-(NOT DF) -> DF, D; R(P)+1  
+        x = (unsigned short)D - MGET(P); 
+        if (!flags[_DF]) x--;
+        D = x & 0xff;
         UPDATE_BORROW(x);
     }
 }
 
-void cdp1802_logicf(unsigned char N) {
+static inline void cdp1802_logicf(unsigned char N) {
     unsigned short x;
-    cdp.debug[3] = N;
+    debug[3] = N;
     if (N == 0x00) { // ldx
-        cdp.D = cdp.R[cdp.X];
-    } else if (N == 0x01) { // or: M(cdp.R(cdp.X)) Ocdp.R cdp.D -> cdp.D 
-        cdp.D = MGET(cdp.X) | cdp.D;
-    } else if (N == 0x02) { // and: M(cdp.R(cdp.X)) AND cdp.D -> cdp.D 
-        cdp.D = MGET(cdp.X) & cdp.D;
-    } else if (N == 0x03) { // xor: M(cdp.R(cdp.X)) cdp.XOcdp.R cdp.D -> D
-        cdp.D = MGET(cdp.X) ^ cdp.D;
-    } else if (N == 0x04) { // add: M(cdp.R(cdp.X))+D -> DF, cdp.D 
-        x = (unsigned short)MGET(cdp.X) + cdp.D;
-        cdp.D = x & 0xff;
-        cdp.flags[DF] = x >> 8;
-        cdp.flags[NDF] = !cdp.flags[DF];
+        D = MGET0(X);
+    } else if (N == 0x01) { // or: M(R(X)) OR D -> D 
+        D = MGET0(X) | D;
+    } else if (N == 0x02) { // and: M(R(X)) AND D -> D 
+        D = MGET0(X) & D;
+    } else if (N == 0x03) { // xor: M(R(X)) XOR D -> D
+        D = MGET0(X) ^ D;
+    } else if (N == 0x04) { // add: M(R(X))+D -> DF, D 
+        x = (unsigned short)MGET0(X) + D;
+        D = x & 0xff;
+        flags[_DF] = x >> 8;
         UPDATE_CARRY(x);
-    } else if (N == 0x05) { // sd: M(cdp.R(cdp.X))-D -> DF,D
-        x = (unsigned short)MGET(cdp.X) - cdp.D;
-        cdp.D = x & 0xff;
-        cdp.flags[NDF] = x >> 8; // no borrow == 1
-        cdp.flags[DF] = !cdp.flags[NDF];
+    } else if (N == 0x05) { // sd: M(R(X))-D -> DF,D
+        x = (unsigned short)MGET0(X) - D;
+        D = x & 0xff;
         UPDATE_BORROW(x);
-    } else if (N == 0x06) { // shr: SHIFT cdp.D cdp.RIGHT; LSB(D) ~ DF, O~ MSB(D)
-        cdp.flags[DF] = cdp.D & 0x01;
-        cdp.flags[NDF] = !cdp.flags[DF];
-        cdp.D = cdp.D >> 1;
-    } else if (N == 0x07) { // sm: D-M(cdp.R(cdp.X)) -> DF, cdp.D 
-        x = (unsigned short)cdp.D - MGET(cdp.X);
-        cdp.D = x & 0xff;
-        cdp.flags[NDF] = x >> 8; // no borrow == 1
-        cdp.flags[DF] = !cdp.flags[NDF];
+    } else if (N == 0x06) { // shr: SHIFT D RIGHT; LSB(D) ~ DF, O~ MSB(D)
+        flags[_DF] = D & 0x01;
+        D = D >> 1;
+    } else if (N == 0x07) { // sm: D-M(R(X)) -> DF, D 
+        x = (unsigned short)D - MGET0(X);
+        D = x & 0xff;
         UPDATE_BORROW(x);
     } else if (N == 0x08) { // ldi
-        cdp.D = MGET(cdp.P); cdp.R[cdp.P]++;
-        cdp.debug[6] = cdp.D;
-    } else if (N == 0x09) { // ori: M(cdp.R(cdp.P)) Ocdp.R cdp.D -> cdp.D; cdp.R(cdp.P)+l
-        cdp.D = MGET(cdp.P) | cdp.D; cdp.R[cdp.P]++;
-    } else if (N == 0x0a) { // andi: M(cdp.R(cdp.P)) AND cdp.D -> cdp.D; cdp.R(cdp.P)+1 
-        cdp.D = MGET(cdp.P) & cdp.D; cdp.R[cdp.P]++;
-    } else if (N == 0x0b) { // xori: M(cdp.R(cdp.P)) cdp.XOcdp.R cdp.D -> cdp.D; cdp.R(cdp.P)+1 
-        cdp.D = MGET(cdp.P) ^ cdp.D; cdp.R[cdp.P]++;
-    } else if (N == 0x0c) { // adi: M(cdp.R(cdp.P))+D -> DF, cdp.D; cdp.R(cdp.P)+1
-        x = (unsigned short)MGET(cdp.P) + cdp.D; cdp.R[cdp.P]++;
-        cdp.D = x &0xff;
+        D = MGET(P);
+    } else if (N == 0x09) { // ori: M(R(P)) OR D -> D; R(P)+l
+        D = MGET(P) | D;
+    } else if (N == 0x0a) { // andi: M(R(P)) AND D -> D; R(P)+1 
+        D = MGET(P) & D;
+    } else if (N == 0x0b) { // xori: M(R(P)) XOR D -> D; R(P)+1 
+        D = MGET(P) ^ D;
+    } else if (N == 0x0c) { // adi: M(R(P))+D -> DF, D; R(P)+1
+        x = (unsigned short)MGET(P) + D; 
+        D = x &0xff;
         UPDATE_CARRY(x);
-    } else if (N == 0x0d) { // sdi: M(cdp.R(cdp.P))-D -> DF,D; cdp.R(cdp.P)+1
-        x = (unsigned short)MGET(cdp.P) - cdp.D; cdp.R[cdp.P]++;
-        cdp.D = x & 0xff;
+    } else if (N == 0x0d) { // sdi: M(R(P))-D -> DF,D; R(P)+1
+        x = (unsigned short)MGET(P) - D; 
+        D = x & 0xff;
         UPDATE_BORROW(x);
-    } else if (N == 0x0e) { // shl: SHIFT cdp.D LEFT; MSB(O) -> OF, 0-> LSB(O)
-        cdp.flags[DF] = cdp.D & 0x80;
-        cdp.flags[NDF] = !cdp.flags[DF];
-        cdp.D = cdp.D << 1;
-    } else if (N == 0x0f) { // smi: D-M(cdp.R(cdp.P)) -> DF, cdp.D; cdp.R(cdp.P)+1  
-        x = (unsigned short)cdp.D - MGET(cdp.P); cdp.R[cdp.P]++;
-        cdp.D = x & 0xff;
-        cdp.flags[NDF] = x >> 8; // no borrow == 1
-        cdp.flags[DF] = !cdp.flags[NDF];
+    } else if (N == 0x0e) { // shl: SHIFT D LEFT; MSB(O) -> OF, 0-> LSB(O)
+        flags[_DF] = D & 0x80;
+        D = D << 1;
+    } else if (N == 0x0f) { // smi: D-M(R(P)) -> DF, D; R(P)+1  
+        x = (unsigned short)D - MGET(P); 
+        D = x & 0xff;
         UPDATE_BORROW(x);
     }
 }
 
 void cdp1802_dispatch() {
-    cdp.debug[0] = cdp.R[cdp.P];
-    unsigned char m = MGET(cdp.P); cdp.R[cdp.P]++;
+    unsigned char m = MGET(P); 
     unsigned char I = m >> 4;
     unsigned char N = m & 0x0f;
-    cdp.debug[1] = I;
-    cdp.debug[2] = N;
-    cdp.debug[4] = cdp.D;
     
     if (I == 0x00) { // ld(N)
-        cdp.D = MGET(N);
-        cdp.debug[7] = 0x10;
+        D = MGET0(N);
     } else if (I == 0x01) { // inc(N)
-        cdp.R[N]++;
-        cdp.debug[7] = 0x11;
+        R[N]++;
     } else if (I == 0x02) { // dec(N)
-        cdp.R[N]--;
-        cdp.debug[7] = 0x12;
+        R[N]--;
     } else if (I == 0x03) { // short branch
-        UPDATE_ZF(cdp.D);
-        m = MGET(cdp.P); cdp.R[cdp.P]++;
-        if (cdp.flags[N]) {
-            cdp.R[cdp.P] &= 0xff00;
-            cdp.R[cdp.P] |= m;
-        }
-        cdp.debug[7] = 0x13;
+        m = MGET(P);
+        UPDATE_ZF(D);
+        unsigned char f = flags[N&0x7];
+        debug[0] = f;
+        if (N&0x8) f = !f;
+        debug[1] = f;
+        if (f) R[P] = (R[P]&0xff00)|m;
     } else if (I == 0x04) { // lda(N)
-        cdp.D = MGET(N); cdp.R[N]++;
-        cdp.debug[7] = 0x14;
+        D = MGET(N);
     } else if (I == 0x05) { // str(n)
-        MSET(N, cdp.D);
-        cdp.debug[7] = 0x15;
+        MSET(N, D);
     } else if (I == 0x06) { // i/o
         if (N==0) {
-            cdp.R[cdp.X]++;
+            R[X]++;
         } else {
             //
         }
-        cdp.debug[7] = 0x16;
     } else if (I == 0x07) { // control & arithmetic
         cdp1802_logic7(N);
-        cdp.debug[7] = 0x17;
     } else if (I == 0x08) { // glo(N)
-        cdp.D = cdp.R[N] & 0xff; // get the low byte of the register
-        cdp.debug[7] = 0x18;
+        D = R[N] & 0xff; // get the low byte of the register
     } else if (I == 0x09) { // ghi(N)
-        cdp.D = cdp.R[N] >> 8; // get the high byte of the register
-        cdp.debug[7] = 0x19;
+        D = R[N] >> 8; // get the high byte of the register
     } else if (I == 0x0a) { // setlo(N)
-        cdp.R[N] &= 0xff00;
-        cdp.R[N] |= (unsigned short)cdp.D; // set the low byte of the register
-        cdp.debug[7] = 0x1a;
+        R[N] &= 0xff00;
+        R[N] |= (unsigned short)D; // set the low byte of the register
     } else if (I == 0x0b) { //sethi(N)
-        cdp.R[N] &= 0x00ff;
-        cdp.R[N] |= ((unsigned short)cdp.D) << 8; // set the low byte of the register
-        cdp.debug[7] = 0x1b;
+        R[N] &= 0x00ff;
+        R[N] |= ((unsigned short)D) << 8; // set the low byte of the register
     } else if (I == 0x0c) { // long branch
-        UPDATE_ZF(cdp.D);
-        unsigned short hi = MGET(cdp.P); cdp.R[cdp.P]++;
-        unsigned short lo = MGET(cdp.P); cdp.R[cdp.P]++;
-        if (cdp.flags[N]) {
-            cdp.R[cdp.P] = hi << 8;
-            cdp.R[cdp.P] |= lo;
+        if ((N > 0x07) ? flags[N] : !flags[N]) {
+            R[P] = ((unsigned short) MGET(P) << 8) | MGET(P);
+        } else {
+            R[P] += 2;
         }
-        cdp.debug[7] = 0x1c;
     } else if (I == 0x0d) { // sep(N)
-        cdp.P = N;
-        cdp.debug[7] = 0x1d;
+        P = N;
     } else if (I == 0x0e) { // sex(N)
-        cdp.X = N;
-        cdp.debug[7] = 0x1e;
+        X = N;
     } else if (I == 0x0f) { // logicf
-        cdp.debug[7] = 0x1f;
         cdp1802_logicf(N);
     } else { // default
-        cdp.debug[7] = 0xff;
+        debug[7] = 0xff; // error
     }    
-    cdp.debug[5] = cdp.D;
 }
 
-cdp1802 *cdp1802_init(unsigned char (*mget)(unsigned short), void (*mset)(unsigned short, unsigned char)) {
+static inline bool takeBranch(uint8_t N) {
+  // N ∈ [0..15]; for 0..7 use !flags[N], for 8..15 use  flags[N]
+  return (N & 0x08) ? flags[N] : !flags[N];
+}
+
+void cdp1802_dispatch_new() {
+  uint8_t m = MGET(P);             // fetch opcode (your MGET likely auto-increments P)
+  uint8_t I = m >> 4;
+  uint8_t N = m & 0x0F;
+
+  switch (I) {
+    case 0x0: D = MGET0(N); UPDATE_ZF(D); break;                 // LDn
+    case 0x1: R[N]++; break;                                     // INCn
+    case 0x2: R[N]--; break;                                     // DECn
+    case 0x3: {                                                 // BR short
+      uint8_t lo = MGET(P);                                     // next byte
+      if (takeBranch(N)) { R[P] = (R[P] & 0xFF00) | lo; }
+      /* else P already advanced by MGET(P) */
+    } break;
+    case 0x4: D = MGET0(N); break;                               // LDAn
+    case 0x5: MSET(N, D); break;                                 // STRn
+    case 0x6: if (N == 0) { R[X]++; } /* else ... IO */ break;   // I/O
+    case 0x7: cdp1802_logic7(N); break;
+    case 0x8: D =  R[N]        & 0xFF; break;                    // GLO
+    case 0x9: D = (R[N] >> 8)  & 0xFF; break;                    // GHI
+    case 0xA: R[N] = (R[N] & 0xFF00) | (uint16_t)D; break;       // PLO
+    case 0xB: R[N] = (R[N] & 0x00FF) | ((uint16_t)D << 8); break;// PHI
+    case 0xC: {                                                 // LBR long
+      if (takeBranch(N)) {
+        uint8_t hi = MGET(P);
+        uint8_t lo = MGET(P);
+        R[P] = ((uint16_t)hi << 8) | lo;
+      } else {
+        R[P] += 2; // or rely on two MGET(P) side-effects if you prefer reading then ignoring
+      }
+    } break;
+    case 0xD: P = N; break;                                      // SEP
+    case 0xE: X = N; break;                                      // SEX
+    case 0xF: cdp1802_logicf(N); break;
+    default: debug[7] = 0xFF; break;
+  }
+}
+
+cdp1802 *cdp1802_info() {
     cdp.mget = mget;
     cdp.mset = mset;
-    memset(cdp.flags, 0, 8); // set flags to false
-    memset(&cdp.flags[8], 0x01, 8); // set negative flags to true
-    cdp.flags[UF] = 0x01; // unconditional branch
-    cdp.flags[NUF] = 0x00; // skp
-    cdp.P = 0;
-    cdp.X = 0;
-    cdp.D = 0;
-    cdp.rp = (unsigned char *)cdp.R;
+    cdp.R = R;
+    cdp.P = P;
+    cdp.X = X;
+    cdp.D = D;
+    cdp.IE = IE;
+    cdp.flags = flags;
+    cdp.debug = debug;
     return &cdp;
+}
+
+cdp1802 *cdp1802_init(unsigned char (*_mget)(unsigned short), void (*_mset)(unsigned short, unsigned char)) {
+    mget = _mget;
+    mset = _mset;
+    memset(flags, 0, 8); // set flags to false
+    memset(&flags[8], 0x01, 8); // set negative flags to true
+    flags[_UF] = 0x01; // unconditional branch
+    P = 0;
+    X = 0;
+    D = 0;
+    return cdp1802_info();
 }
 
 void cdp1802_main() {
@@ -252,6 +282,3 @@ void cdp1802_main() {
     }
 }
 
-cdp1802 *cdp1802_info() {
-    return &cdp;
-}

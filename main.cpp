@@ -12,7 +12,8 @@ static uint8_t* fb;
 static uint8_t fb2[256];
 
 unsigned char mget(unsigned short addr) {
-  return rom[addr & 0xff];
+  return spaceship[addr & 0xff];
+  // return rom[addr & 0xff];
 }
 static    uint16_t y;
 static    uint16_t x;
@@ -39,7 +40,7 @@ void setup() {
   arduboy.setFrameRate(1);     // keep it simple
   arduboy.clear();
   arduboy.setCursor(0, 54);
-  arduboy.print(F("COSMAC VIP EMU!"));
+  // arduboy.print(F("COSMAC VIP EMU!"));
   arduboy.display();            // push first frame immediately
   fb = arduboy.getBuffer();
   cdp = cdp1802_init(mget, mset);
